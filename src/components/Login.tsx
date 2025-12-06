@@ -2,42 +2,63 @@ import React, { useState } from 'react';
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
-import { User, Lock, ArrowRight, Loader2 } from 'lucide-react';
+import { User, Lock, ArrowRight, Loader2, AlertCircle } from 'lucide-react';
 import { Card, CardContent, CardFooter, CardHeader } from "./ui/card";
 import { toast } from "sonner@2.0.3";
 import logoImage from "figma:asset/e827750074831b7c0b1fd927cc5b318bf0bb80ab.png";
+import { api, ApiError } from '../lib/api';
+import { saveAuthToken } from '../lib/auth';
 
 interface LoginProps {
-  onLogin: () => void;
+  onLogin: (userData: any) => void;
 }
 
 export function Login({ onLogin }: LoginProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [account, setAccount] = useState("mike.tech");
   const [password, setPassword] = useState("password");
+  const [error, setError] = useState<string>("");
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
+    setError("");
 
-    // TODO: Backend Integration - Sign In
-    // Implement authentication logic here
-    // Example:
-    // const { data, error } = await supabase.auth.signInWithPassword({
-    //   email: account + "@igreenplus.com", // transform account to email if needed internally
-    //   password,
-    // });
-    
-    // Simulate network delay
-    setTimeout(() => {
-      setIsLoading(false);
-      if (account && password) {
-        onLogin();
-        toast.success("Welcome back, Mike!");
+    try {
+      // 调用真实的登录API
+      const authData = await api.login(account, password);
+
+      // 保存认证信息到本地存储
+      saveAuthToken(authData);
+
+      // 通知父组件登录成功
+      onLogin(authData.user);
+
+      // 显示欢迎消息
+      toast.success(`Welcome back, ${authData.user.name}!`);
+    } catch (err) {
+      console.error('Login error:', err);
+
+      if (err instanceof ApiError) {
+        // 处理API错误
+        if (err.status === 401) {
+          setError("Incorrect username or password");
+          toast.error("Incorrect username or password");
+        } else if (err.status === 500) {
+          setError("Server error. Please try again later.");
+          toast.error("Server error. Please check if backend is running.");
+        } else {
+          setError(err.message);
+          toast.error(err.message);
+        }
       } else {
-        toast.error("Please enter valid credentials");
+        // 网络错误或其他错误
+        setError("Cannot connect to server. Please check your connection.");
+        toast.error("Cannot connect to server. Is the backend running?");
       }
-    }, 1500);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -60,6 +81,12 @@ export function Login({ onLogin }: LoginProps) {
           <CardHeader className="space-y-1 pb-2">
             <h2 className="text-2xl font-bold text-center text-slate-900">Sign in to your account</h2>
             <p className="text-sm text-slate-500 text-center">Enter your account and password</p>
+            {error && (
+              <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-lg flex items-start gap-2 text-sm mt-2">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{error}</span>
+              </div>
+            )}
           </CardHeader>
           <CardContent className="space-y-4 pt-4">
             <form onSubmit={handleSubmit} className="space-y-4">
@@ -114,6 +141,10 @@ export function Login({ onLogin }: LoginProps) {
             </form>
           </CardContent>
           <CardFooter className="flex flex-col space-y-4 bg-slate-50/50 border-t p-6">
+            <div className="text-center text-xs text-slate-500">
+              <strong>Test Accounts:</strong><br />
+              <code className="bg-slate-200 px-2 py-0.5 rounded">mike.tech / password</code> or <code className="bg-slate-200 px-2 py-0.5 rounded">admin / admin123</code>
+            </div>
             <div className="text-center text-xs text-slate-500">
               By clicking continue, you agree to our <a href="#" className="underline hover:text-slate-900">Terms of Service</a> and <a href="#" className="underline hover:text-slate-900">Privacy Policy</a>.
             </div>

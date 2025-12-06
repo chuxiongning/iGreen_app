@@ -8,7 +8,8 @@ import { Login } from './components/Login';
 import { Ticket, TicketStatus } from './lib/data';
 import { Toaster } from "./components/ui/sonner";
 import { toast } from "sonner@2.0.3";
-import { api } from './lib/api';
+import { api, ApiError } from './lib/api';
+import { isAuthenticated, getCurrentUser, clearAuth, UserData } from './lib/auth';
 import { Button } from "./components/ui/button";
 import { RefreshCw, Database } from 'lucide-react';
 import { LanguageProvider, useLanguage } from './components/LanguageContext';
@@ -23,15 +24,21 @@ export interface UserProfile {
 }
 
 function AppContent() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authenticated, setAuthenticated] = useState(isAuthenticated());
   const [currentView, setCurrentView] = useState('dashboard');
-  const [user, setUser] = useState<UserProfile>({
-    name: "Mike Technician",
-    email: "mike.tech@volttech.com",
-    username: "mike.tech",
-    phone: "+1 (555) 123-4567",
-    group: "Bangkok Operations (Zone A)",
-    id: "TECH-8821"
+  const [user, setUser] = useState<UserProfile | null>(() => {
+    const userData = getCurrentUser();
+    if (userData) {
+      return {
+        id: userData.id,
+        username: userData.username,
+        name: userData.name,
+        email: userData.email || "",
+        phone: userData.phone || "",
+        group: userData.group || "",
+      };
+    }
+    return null;
   });
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
@@ -43,7 +50,7 @@ function AppContent() {
 
   const loadTickets = async (reset = false) => {
     if (loadingMore && !reset) return;
-    
+
     try {
       if (reset) {
         setRefreshing(true);
@@ -51,16 +58,16 @@ function AppContent() {
       } else {
         setLoadingMore(true);
       }
-      
+
       const limit = 20;
       const offset = reset ? 0 : tickets.length;
-      
+
       const data = await api.getTickets(offset, limit);
-      
+
       if (data.length < limit) {
         setHasMore(false);
       }
-      
+
       if (reset) {
         setTickets(data);
       } else {
@@ -88,15 +95,12 @@ function AppContent() {
   };
 
   useEffect(() => {
-    if (isAuthenticated) {
+    if (authenticated) {
       loadTickets(true);
     }
-  }, [isAuthenticated]);
+  }, [authenticated]);
 
   const handleTicketClick = (ticket: Ticket) => {
-    // TODO: Backend Integration - Ticket Details
-    // If the list only contains summary data, fetch full details here.
-    // Example: const fullTicket = await api.getTicketDetails(ticket.id);
     setSelectedTicket(ticket);
   };
 
@@ -111,10 +115,10 @@ function AppContent() {
     if (!targetTicket) return;
 
     if (targetTicket.status === 'open' && updates.status === 'assigned') {
-      updates.assignee = "Mike Technician"; 
+      updates.assignee = user?.name || "Technician";
     }
 
-    setTickets(prev => prev.map(t => 
+    setTickets(prev => prev.map(t =>
       t.id === id ? { ...t, ...updates } : t
     ));
 
@@ -138,19 +142,52 @@ function AppContent() {
      handleUpdateTicket(id, { status: newStatus as TicketStatus });
   };
 
-  const handleLogin = () => {
-    setIsAuthenticated(true);
+  const handleLogin = (userData: UserData) => {
+    setUser({
+      id: userData.id,
+      username: userData.username,
+      name: userData.name,
+      email: userData.email || "",
+      phone: userData.phone || "",
+      group: userData.group || "",
+    });
+    setAuthenticated(true);
     setCurrentView('dashboard');
   };
 
-  const handleLogout = () => {
-    setIsAuthenticated(false);
+  const handleLogout = async () => {
+    try {
+      await api.logout();
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
+    clearAuth();
+    setAuthenticated(false);
+    setUser(null);
+    setTickets([]);
     toast.info("Logged out successfully");
   };
 
-  const handleUpdateProfile = (updates: Partial<UserProfile>) => {
-    setUser(prev => ({ ...prev, ...updates }));
-    toast.success("Profile updated successfully");
+  const handleUpdateProfile = async (updates: Partial<UserProfile>) => {
+    try {
+      const updatedUser = await api.updateProfile(updates);
+      setUser({
+        id: updatedUser.id,
+        username: updatedUser.username,
+        name: updatedUser.name,
+        email: updatedUser.email || "",
+        phone: updatedUser.phone || "",
+        group: updatedUser.group || "",
+      });
+      toast.success("Profile updated successfully");
+    } catch (error) {
+      console.error('Update profile error:', error);
+      if (error instanceof ApiError) {
+        toast.error(error.message);
+      } else {
+        toast.error("Failed to update profile");
+      }
+    }
   };
 
   const handleViewRelatedTicket = (ticketId: string) => {
@@ -158,8 +195,6 @@ function AppContent() {
     if (targetTicket) {
       setSelectedTicket(targetTicket);
     } else {
-      // Try to see if we can fetch it or if it's just not in the list
-      // For now, just show error
       toast.error("Related ticket not found in current list.");
     }
   };
@@ -178,7 +213,7 @@ function AppContent() {
     }
   };
 
-  if (!isAuthenticated) {
+  if (!authenticated) {
     return (
       <>
         <Login onLogin={handleLogin} />
@@ -187,15 +222,23 @@ function AppContent() {
     );
   }
 
+  if (!user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <RefreshCw className="w-8 h-8 animate-spin text-teal-600" />
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-screen bg-slate-50 font-sans text-slate-900">
       <div className="hidden md:block">
         <Sidebar currentView={currentView} setCurrentView={setCurrentView} />
       </div>
-      
+
       <div className="flex-1 flex flex-col overflow-hidden pb-16 md:pb-0">
         <Header />
-        
+
         {currentView !== 'profile' && (
           <div className="bg-white border-b px-4 md:px-6 py-2 flex items-center justify-between">
              <div className="text-xs text-slate-500 flex items-center gap-2">
@@ -208,10 +251,10 @@ function AppContent() {
                    Reset Data
                  </Button>
                )}
-               <Button 
-                 variant="ghost" 
-                 size="sm" 
-                 onClick={() => loadTickets(true)} 
+               <Button
+                 variant="ghost"
+                 size="sm"
+                 onClick={() => loadTickets(true)}
                  disabled={refreshing}
                  className="h-8 w-8 p-0"
                >
@@ -220,7 +263,7 @@ function AppContent() {
              </div>
           </div>
         )}
-        
+
         <main className="flex-1 overflow-y-auto relative" id="main-scroll-container">
           {loading && tickets.length === 0 ? (
             <div className="absolute inset-0 flex items-center justify-center bg-white/50 z-10">
@@ -232,17 +275,17 @@ function AppContent() {
           ) : null}
 
           {currentView === 'dashboard' && (
-            <Dashboard 
-              tickets={tickets} 
+            <Dashboard
+              tickets={tickets}
               onTicketClick={handleTicketClick}
               onViewAllClick={() => setCurrentView('queue')}
             />
           )}
-          
+
           {currentView === 'queue' && (
-            <TicketList 
+            <TicketList
               title={t.queue}
-              tickets={getFilteredTickets()} 
+              tickets={getFilteredTickets()}
               onTicketClick={handleTicketClick}
               showAssignee={false}
               onRefresh={() => loadTickets(true)}
@@ -252,11 +295,11 @@ function AppContent() {
               loadingMore={loadingMore}
             />
           )}
-          
+
           {currentView === 'my-work' && (
-            <TicketList 
+            <TicketList
               title={t.myWork}
-              tickets={getFilteredTickets()} 
+              tickets={getFilteredTickets()}
               onTicketClick={handleTicketClick}
               onLoadMore={() => loadTickets(false)}
               hasMore={hasMore}
@@ -265,11 +308,11 @@ function AppContent() {
               refreshing={refreshing}
             />
           )}
-          
+
           {currentView === 'history' && (
-            <TicketList 
+            <TicketList
               title={t.history}
-              tickets={getFilteredTickets()} 
+              tickets={getFilteredTickets()}
               onTicketClick={handleTicketClick}
               onLoadMore={() => loadTickets(false)}
               hasMore={hasMore}
@@ -280,8 +323,8 @@ function AppContent() {
           )}
 
           {currentView === 'profile' && (
-            <Profile 
-              onLogout={handleLogout} 
+            <Profile
+              onLogout={handleLogout}
               user={user}
               onUpdateProfile={handleUpdateProfile}
             />
@@ -293,13 +336,13 @@ function AppContent() {
         <MobileNav currentView={currentView} setCurrentView={setCurrentView} />
       </div>
 
-      <TicketDetail 
-        ticket={selectedTicket} 
-        onClose={handleCloseDetail} 
+      <TicketDetail
+        ticket={selectedTicket}
+        onClose={handleCloseDetail}
         onUpdateTicket={handleUpdateTicket}
         onViewRelatedTicket={handleViewRelatedTicket}
       />
-      
+
       <Toaster />
     </div>
   );

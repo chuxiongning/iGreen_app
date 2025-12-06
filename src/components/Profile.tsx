@@ -7,6 +7,9 @@ import { useLanguage } from './LanguageContext';
 import { LogOut, Globe, User, Mail, Phone, Shield, Users, Pencil, Save, X } from 'lucide-react';
 import { Badge } from "./ui/badge";
 import { Separator } from "./ui/separator";
+import { api } from '../lib/api';
+import { updateLocalUser } from '../lib/auth';
+import { toast } from "sonner@2.0.3";
 
 // Redefine here to avoid importing from App.tsx which might cause cycles
 export interface UserProfile {
@@ -52,14 +55,31 @@ export function Profile({ onLogout, user, onUpdateProfile }: ProfileProps) {
   };
 
   const handleSave = () => {
-    // TODO: Backend Integration - Update Profile
-    // Call API to save user profile updates
-    // Example: await api.updateUserProfile(user.id, formData);
-    
     if (onUpdateProfile) {
       onUpdateProfile(formData);
     }
     setIsEditing(false);
+  };
+
+  const handleLanguageChange = async (newLanguage: 'en' | 'th') => {
+    const oldLanguage = language;
+    try {
+      // 立即更新UI
+      setLanguage(newLanguage);
+
+      // 同步到后端
+      await api.updatePreferences({ language: newLanguage });
+
+      // 更新本地存储的用户数据
+      updateLocalUser({ language: newLanguage });
+
+      toast.success(`Language changed to ${newLanguage === 'en' ? 'English' : 'ไทย'}`);
+    } catch (error) {
+      console.error('Failed to update language preference:', error);
+      // 如果失败,回滚
+      setLanguage(oldLanguage);
+      toast.error("Failed to update language preference");
+    }
   };
 
   const handleChange = (field: keyof UserProfile, value: string) => {
@@ -169,19 +189,16 @@ export function Profile({ onLogout, user, onUpdateProfile }: ProfileProps) {
               </div>
               <span className="font-medium text-slate-700">{t.language}</span>
             </div>
-            {/* TODO: Backend Integration - Language Preference */}
-            {/* Persist language selection to user profile/settings */}
-            {/* Example: await api.updateUserPreference({ language: 'en' }); */}
             <div className="flex items-center bg-slate-100 rounded-lg p-1">
-              <button 
+              <button
                 className={`px-3 py-1 text-sm font-medium rounded-md transition-all ${language === 'en' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-900'}`}
-                onClick={() => setLanguage('en')}
+                onClick={() => handleLanguageChange('en')}
               >
                 English
               </button>
-              <button 
+              <button
                 className={`px-3 py-1 text-sm font-medium rounded-md transition-all ${language === 'th' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-900'}`}
-                onClick={() => setLanguage('th')}
+                onClick={() => handleLanguageChange('th')}
               >
                 ไทย
               </button>
@@ -196,9 +213,6 @@ export function Profile({ onLogout, user, onUpdateProfile }: ProfileProps) {
         variant="destructive" 
         className="w-full h-12 gap-2 text-base shadow-lg shadow-red-100"
         onClick={() => {
-          // TODO: Backend Integration - Sign Out
-          // Call auth API to revoke session
-          // Example: await supabase.auth.signOut();
           if (onLogout) onLogout();
         }}
       >
